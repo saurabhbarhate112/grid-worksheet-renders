@@ -1,0 +1,49 @@
+name: render
+on:
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: Cycles samples
+        default: "48"
+      only:
+        description: Space-separated spec numbers to render (blank = all)
+        default: ""
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender 4.2.16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libxkbcommon0 libsm6 > /dev/null
+          curl -sL https://download.blender.org/release/Blender4.2/blender-4.2.16-linux-x64.tar.xz | tar -xJ
+          mv blender-4.2.16-linux-x64 blender
+          ./blender/blender --version | head -1
+          nproc
+      - name: Render shard
+        env:
+          SAMPLES: ${{ github.event.inputs.samples }}
+          ONLY: ${{ github.event.inputs.only }}
+        run: |
+          mkdir -p out
+          for f in specs/*.json; do
+            n=$(basename "$f" .json); i=$((10#$n))
+            if [ -n "$ONLY" ]; then
+              echo " $ONLY " | grep -q " $i " || continue
+            fi
+            [ $(( (i - 1) % 20 )) -eq ${{ matrix.shard }} ] || continue
+            t=$(date +%s)
+            ./blender/blender -b --factory-startup -noaudio -P blender_render.py -- "$f" "out/$n" "${SAMPLES:-48}" > "out/$n.log" 2>&1 || true
+            if grep -q DONE "out/$n.log"; then echo "OK $n $(( $(date +%s) - t ))s"; else echo "FAIL $n"; tail -40 "out/$n.log"; fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renders-${{ matrix.shard }}
+          path: out
+          retention-days: 3
