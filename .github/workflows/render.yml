@@ -8,6 +8,9 @@ on:
       only:
         description: Space-separated spec numbers to render (blank = all)
         default: ""
+      res:
+        description: Render resolution override (blank = spec default)
+        default: ""
 jobs:
   render:
     runs-on: ubuntu-latest
@@ -30,6 +33,7 @@ jobs:
         env:
           SAMPLES: ${{ github.event.inputs.samples }}
           ONLY: ${{ github.event.inputs.only }}
+          RES: ${{ github.event.inputs.res }}
         run: |
           mkdir -p out
           for f in specs/*.json; do
@@ -39,7 +43,7 @@ jobs:
             fi
             [ $(( (i - 1) % 20 )) -eq ${{ matrix.shard }} ] || continue
             t=$(date +%s)
-            ./blender/blender -b --factory-startup -noaudio -P blender_render.py -- "$f" "out/$n" "${SAMPLES:-48}" > "out/$n.log" 2>&1 || true
+            ./blender/blender -b --factory-startup -noaudio -P blender_render.py -- "$f" "out/$n" "${SAMPLES:-48}" $RES > "out/$n.log" 2>&1 || true
             if grep -q DONE "out/$n.log"; then echo "OK $n $(( $(date +%s) - t ))s"; else echo "FAIL $n"; tail -40 "out/$n.log"; fi
           done
       - uses: actions/upload-artifact@v4

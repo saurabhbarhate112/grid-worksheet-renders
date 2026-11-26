@@ -245,6 +245,73 @@ def make_material(name, m):
     elif kind == "plastic":
         p.inputs["Base Color"].default_value = (*col, 1)
         p.inputs["Roughness"].default_value = m.get("roughness", 0.3)
+    elif kind == "banded":
+        # horizontal paint bands: bands = [[z_from_m, [r,g,b]], ...] sorted by z
+        zf = _zfac(nt, vec, 0.0, H)
+        rr = nt.nodes.new("ShaderNodeValToRGB")
+        rr.color_ramp.interpolation = "CONSTANT"
+        els = rr.color_ramp.elements
+        bands = m["bands"]
+        els[0].position = 0.0
+        els[0].color = (*bands[0][1], 1)
+        els[1].position = min(0.999, max(0.001, bands[1][0] / H)) if len(bands) > 1 else 0.999
+        els[1].color = (*(bands[1][1] if len(bands) > 1 else bands[0][1]), 1)
+        for zb, cb in bands[2:]:
+            e = els.new(min(0.999, max(0.001, zb / H)))
+            e.color = (*cb, 1)
+        nt.links.new(zf, rr.inputs["Fac"])
+        nt.links.new(rr.outputs["Color"], p.inputs["Base Color"])
+        p.inputs["Roughness"].default_value = m.get("roughness", 0.35)
+        p.inputs["Metallic"].default_value = m.get("metallic", 0.0)
+        p.inputs["Coat Weight"].default_value = m.get("coat", 0.0)
+        n = _noise(nt, 20.0 / H, 4.0, 0.6, vec=vec)
+        nt.links.new(_bump(nt, n.outputs["Fac"], m.get("bump", 0.05), 0.001), p.inputs["Normal"])
+    elif kind == "segments":
+        # vertical segments around the axis (beach ball, watermelon stripes)
+        sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+        nt.links.new(vec, sep.inputs[0])
+        at = _math(nt, "ARCTAN2", sep.outputs["Y"], sep.outputs["X"])
+        a01 = _math(nt, "ADD", _math(nt, "DIVIDE", at, 2 * math.pi), 0.5)
+        if m.get("wobble"):
+            nn = _noise(nt, m.get("wobble_scale", 6.0) / H, 3.0, 0.6, vec=vec)
+            a01 = _math(nt, "ADD", a01, _math(nt, "MULTIPLY", _math(nt, "SUBTRACT", nn.outputs["Fac"], 0.5),
+                                              m["wobble"]))
+        a01 = _math(nt, "FRACT", a01)
+        cols = m["colors"]
+        nseg = m.get("n", len(cols))
+        rr = nt.nodes.new("ShaderNodeValToRGB")
+        rr.color_ramp.interpolation = "CONSTANT"
+        els = rr.color_ramp.elements
+        els[0].position = 0.0
+        els[0].color = (*cols[0], 1)
+        els[1].position = 1.0 / nseg
+        els[1].color = (*cols[1 % len(cols)], 1)
+        for k in range(2, nseg):
+            e = els.new(k / nseg)
+            e.color = (*cols[k % len(cols)], 1)
+        nt.links.new(a01, rr.inputs["Fac"])
+        nt.links.new(rr.outputs["Color"], p.inputs["Base Color"])
+        p.inputs["Roughness"].default_value = m.get("roughness", 0.3)
+        p.inputs["Coat Weight"].default_value = m.get("coat", 0.0)
+        n = _noise(nt, 30.0 / H, 4.0, 0.6, vec=vec)
+        nt.links.new(_bump(nt, n.outputs["Fac"], m.get("bump", 0.04), 0.001), p.inputs["Normal"])
+    elif kind == "globe":
+        n = _noise(nt, m.get("scale", 2.2) / H, 6.0, 0.62, distortion=0.6, vec=vec)
+        rr = _ramp(nt, n.outputs["Fac"], [(0.0, [0.03, 0.12, 0.30]), (0.53, [0.06, 0.22, 0.42])])
+        e1 = rr.color_ramp.elements.new(0.535)
+        e1.color = (0.52, 0.48, 0.30, 1)
+        e2 = rr.color_ramp.elements.new(0.62)
+        e2.color = (0.25, 0.38, 0.14, 1)
+        e3 = rr.color_ramp.elements.new(0.72)
+        e3.color = (0.45, 0.33, 0.18, 1)
+        nt.links.new(rr.outputs["Color"], p.inputs["Base Color"])
+        p.inputs["Roughness"].default_value = 0.35
+        p.inputs["Coat Weight"].default_value = 0.6
+    elif kind == "glow":
+        p.inputs["Base Color"].default_value = (*col, 1)
+        p.inputs["Roughness"].default_value = 0.3
+        p.inputs["Emission Color"].default_value = (*col, 1)
+        p.inputs["Emission Strength"].default_value = m.get("strength", 1.5)
     elif kind == "sand":
         n = _noise(nt, 900.0 * 0.3 / H, 2.0, 0.5, vec=vec)
         r = _ramp(nt, n.outputs["Fac"], [(0.3, [c * 0.8 for c in col]), (0.7, col)])
@@ -405,7 +472,13 @@ for i, pt in enumerate(SPEC["parts"]):
         raise ValueError(pt["type"])
     if pt.get("rot_z"):
         ob.rotation_euler[2] = math.radians(pt["rot_z"])
-    ob["label"] = pt.get("label", i + 1)
+    if pt.get("rot3"):
+        # rotate about the part's own local origin, then move it into place
+        ob.rotation_euler = [math.radians(a) for a in pt["rot3"]]
+        if pt.get("loc3"):
+            ob.location = Vector(pt["loc3"])
+    lab = int(pt.get("label", (i % 30) + 1))
+    ob["label"] = ((lab - 1) % 31) + 1
     parts.append(ob)
 
 H = SPEC["height"]
