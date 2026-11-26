@@ -161,6 +161,16 @@ def make_material(name, m):
         n = _noise(nt, 60.0 * 0.3 / H, 8.0, 0.7, vec=vec)
         nt.links.new(_bump(nt, n.outputs["Fac"], m.get("bump", 0.25), 0.002), p.inputs["Normal"])
     elif kind == "glass":
+        # let shadow rays mostly pass so things inside glass get lit (caustics are off), keep a faint shadow
+        lp = nt.nodes.new("ShaderNodeLightPath")
+        tr = nt.nodes.new("ShaderNodeBsdfTransparent")
+        tr.inputs["Color"].default_value = (*[0.55 + 0.45 * c for c in col], 1)
+        mx = nt.nodes.new("ShaderNodeMixShader")
+        fac = _math(nt, "MULTIPLY", lp.outputs["Is Shadow Ray"], 0.92)
+        nt.links.new(fac, mx.inputs[0])
+        nt.links.new(p.outputs["BSDF"], mx.inputs[1])
+        nt.links.new(tr.outputs[0], mx.inputs[2])
+        nt.links.new(mx.outputs[0], out.inputs["Surface"])
         p.inputs["Base Color"].default_value = (*col, 1)
         p.inputs["Transmission Weight"].default_value = 1.0
         p.inputs["Roughness"].default_value = m.get("roughness", 0.0)
@@ -438,7 +448,7 @@ bdo = _finish("backdrop", verts, faces, bmat)
 # camera
 elev = math.radians(SPEC.get("elev", 9.0))
 focal = SPEC.get("focal", 90.0)
-frac = SPEC.get("frame", 0.80)
+frac = SPEC.get("frame", 0.74)
 fov = 2 * math.atan(18.0 / focal)
 target = Vector((0, 0, H * 0.5))
 extent = max(H, W * 1.02)
